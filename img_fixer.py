@@ -15,50 +15,44 @@ def parse_json_files():
     for year_folder in file_list:
         if year_folder.name.startswith("Photos from "):
             print("processing folder: {0}".format(year_folder.name))
-            total_file_count = len(os.listdir(os.path.join(current_path, year_folder.name)))
-            processed_file_count = 0
-            modified_file_count = 0
-            skipped_file_count = 0
             with os.scandir(os.path.join(current_path,year_folder.name)) as it:
                 for file in it:
-                    processed_file_count = processed_file_count + 1
                     if file.name.endswith(".json") and file.name != 'metadata.json':
                         json_file = None
                         with open(file.path) as f:
                             json_file = json.load(f)
-                        if not str(json_file['title']).endswith(".HEIC"):
-                            exif_data = piexif.load(os.path.join(current_path, year_folder, json_file['title']))
+                        try:
+                            exif_data = piexif.load(os.path.join(current_path, year_folder.name, json_file['title']))
+                        except FileNotFoundError:
+                            os.renames(file.path, os.path.join(procesed_path, year_folder.name, file.name))
+                            continue
+                        except piexif._exceptions.InvalidImageDataError:
+                            os.renames(file.path, os.path.join(procesed_path, year_folder.name, file.name))
+                            continue
 
-                            if piexif.ImageIFD.DateTime in exif_data['0th']:
-                                print("exif data already exists for image: {0}".format(os.path.join(current_path, year_folder, json_file['title'])))
-                                existing_date = datetime.datetime.strptime(exif_data["0th"][piexif.ImageIFD.DateTime].decode(), "%Y:%m:%d %H:%M:%S")
-                                photo_time = datetime.datetime.fromtimestamp(int(json_file['photoTakenTime']['timestamp']))
-                                if existing_date > photo_time:
-                                    print("Date in json file is older. using data from json")
-                                    exif_data['0th'][piexif.ImageIFD.DateTime] = photo_time.strftime("%Y:%m:%d %H:%M:%S")
-                                    piexif.insert(piexif.dump(exif_data), os.path.join(current_path, year_folder, json_file['title']))
-                                    os.renames(file.path, os.path.join(procesed_path, year_folder.name, file.name))
-                                else:
-                                    print("date in json is newer. skipping file")
-                                    skipped_file_count = skipped_file_count + 1
+                        if piexif.ImageIFD.DateTime in exif_data['0th']:
+                            if "-" in str(exif_data["0th"][piexif.ImageIFD.DateTime].decode()):
+                                existing_date = datetime.datetime.strptime(exif_data["0th"][piexif.ImageIFD.DateTime].decode(), "%Y-%m-%d %H:%M:%S")
                             else:
-                                modified_file_count = modified_file_count + 1
-                                photo_time = datetime.datetime.fromtimestamp(int(json_file['photoTakenTime']['timestamp']))
+                                existing_date = datetime.datetime.strptime(exif_data["0th"][piexif.ImageIFD.DateTime].decode(), "%Y:%m:%d %H:%M:%S")
+                            photo_time = datetime.datetime.fromtimestamp(int(json_file['photoTakenTime']['timestamp']))
+                            if existing_date > photo_time:
                                 exif_data['0th'][piexif.ImageIFD.DateTime] = photo_time.strftime("%Y:%m:%d %H:%M:%S")
-                                piexif.insert(piexif.dump(exif_data), os.path.join(current_path, year_folder, json_file['title']))
+                                try:
+                                    piexif.insert(piexif.dump(exif_data), os.path.join(current_path, year_folder, json_file['title']))
+                                except ValueError:
+                                    pass
                                 os.renames(file.path, os.path.join(procesed_path, year_folder.name, file.name))
-                                
-                        else:
-                            print("file not supported")
-                            skipped_file_count = skipped_file_count + 1
-                            os.renames(file.path, os.path.join(skipped_path, year_folder.name, file.name))
-            
-            print("Summary for {0}".format(year_folder.name))
-            print("Total Files: {0}".format(total_file_count))
-            print("Exif Data Modified Files: {0}".format(modified_file_count))
-            print("Skipped Files: {0}".format(skipped_file_count))
-            print()
+                            else:
+                                os.renames(file.path, os.path.join(skipped_path, year_folder.name, file.name))
 
+                        else:
+                            photo_time = datetime.datetime.fromtimestamp(int(json_file['photoTakenTime']['timestamp']))
+                            exif_data['0th'][piexif.ImageIFD.DateTime] = photo_time.strftime("%Y:%m:%d %H:%M:%S")
+                            piexif.insert(piexif.dump(exif_data), os.path.join(current_path, year_folder, json_file['title']))
+                            os.renames(file.path, os.path.join(procesed_path, year_folder.name, file.name))
+                    else:
+                        pass
 
 
 def parse_edited_files():
@@ -73,7 +67,9 @@ def parse_edited_files():
                             piexif.transplant(img_file.path.replace("-edited", ""), img_file.path)
                             os.renames(img_file.path.replace("-edited", ""), os.path.join(edit_path, year_folder.name, img_file.name.replace("-edited", "")))
                         except FileNotFoundError:
-                            None
+                            pass
+                        except piexif._exceptions.InvalidImageDataError:
+                            break
 
 def main():
     print("initializing...")
